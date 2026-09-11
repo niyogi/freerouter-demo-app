@@ -14,10 +14,81 @@ const history = [];
 function addMessage(role, text) {
   const div = document.createElement('div');
   div.className = `msg ${role === 'user' ? 'user' : 'bot'}`;
-  div.textContent = text;
+  if (role === 'bot' && text !== 'Thinking…') div.innerHTML = renderMarkdown(text);
+  else div.textContent = text;
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
+}
+
+// Minimal markdown for model replies (code, bold/italic, links, headings,
+// lists, paragraphs). HTML is escaped first, so model output can never
+// inject markup; link targets are restricted to http(s).
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderInline(s) {
+  let out = escapeHtml(s);
+  out = out.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return out;
+}
+
+function renderMarkdown(src) {
+  const blocks = [];
+  const rest = String(src).replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+    blocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`);
+    return `\u0000${blocks.length - 1}\u0000`;
+  });
+  const html = [];
+  let list = [];
+  let para = [];
+  const flushList = () => {
+    if (list.length) html.push(`<ul>${list.map((i) => `<li>${renderInline(i)}</li>`).join('')}</ul>`);
+    list = [];
+  };
+  const flushPara = () => {
+    if (para.length) html.push(`<p>${para.map(renderInline).join('<br />')}</p>`);
+    para = [];
+  };
+  for (const line of rest.split('\n')) {
+    const trimmed = line.trim();
+    const listMatch = trimmed.match(/^[-*]\s+(.+)/);
+    if (listMatch) {
+      flushPara();
+      list.push(listMatch[1]);
+      continue;
+    }
+    flushList();
+    if (!trimmed) {
+      flushPara();
+      continue;
+    }
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)/);
+    if (heading) {
+      flushPara();
+      const level = heading[1].length + 2;
+      html.push(`<h${level}>${renderInline(heading[2])}</h${level}></h${level}>`);
+      continue;
+    }
+    const codeRef = trimmed.match(/^\u0000\d+\u0000$/);
+    if (codeRef) {
+      flushPara();
+      html.push(trimmed);
+      continue;
+    }
+    para.push(trimmed);
+  }
+  flushList();
+  flushPara();
+  return html.join('').replace(/\u0000(\d+)\u0000/g, (m, i) => blocks[Number(i)]);
 }
 
 // Companion Ads slot. Uses clickUrl for clicks and fires impUrl on view,
@@ -27,6 +98,21 @@ function addAds(ads) {
     if (!ad || typeof ad !== 'object') continue;
     const card = document.createElement('div');
     card.className = 'msg ad';
+    // The whole card is the click target (opens clickUrl); the visible CTA
+    // is a styled span, not a nested link, so there is exactly one target.
+    if (ad.clickUrl) {
+      card.classList.add('clickable');
+      card.setAttribute('role', 'link');
+      card.setAttribute('tabindex', '0');
+      const open = () => window.open(ad.clickUrl, '_blank', 'noopener');
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open();
+        }
+      });
+    }
     const label = document.createElement('div');
     label.className = 'ad-label';
     label.textContent = 'Sponsored';
@@ -44,20 +130,17 @@ function addAds(ads) {
       card.appendChild(body);
     }
     if (ad.clickUrl) {
-      const cta = document.createElement('a');
-      cta.href = ad.clickUrl;
-      cta.target = '_blank';
-      cta.rel = 'noopener sponsored';
+      const cta = document.createElement('span');
       cta.className = 'ad-cta';
       cta.textContent = ad.cta || 'Learn more';
       card.appendChild(cta);
     }
     if (ad.impUrl) {
-      const imp = document.createElement('img');
-      imp.src = ad.impUrl;
+      // Fire the view pixel as soon as the card renders.
+      const imp = new Image(1, 1);
       imp.alt = '';
-      imp.width = 1;
-      imp.height = 1;
+      imp.src = ad.impUrl;
+      imp.className = 'ad-imp';
       card.appendChild(imp);
     }
     messagesEl.appendChild(card);
@@ -85,15 +168,13 @@ async function loadConfig() {
   }
 }
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
+async function sendMessage(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || sendBtn.disabled) return;
   sendBtn.disabled = true;
 
-  addMessage('user', text);
-  history.push({ role: 'user', content: text });
+  addMessage('user', trimmed);
+  history.push({ role: 'user', content: trimmed });
   const typing = addMessage('bot', 'Thinking…');
   typing.classList.add('typing');
 
@@ -119,6 +200,17 @@ form.addEventListener('submit', async (e) => {
     sendBtn.disabled = false;
     input.focus();
   }
+}
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = input.value;
+  input.value = '';
+  sendMessage(text);
+});
+
+document.querySelectorAll('.chip').forEach((chip) => {
+  chip.addEventListener('click', () => sendMessage(chip.textContent));
 });
 
 loadConfig();
