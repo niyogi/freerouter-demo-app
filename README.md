@@ -41,6 +41,8 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000) and start chatting.
 
+**Confirm it's working:** after sending a message, head to the **Logs tab** in your [FreeRouter dashboard](https://freerouter.com) — you should see your successful API request listed there, confirming your key is configured correctly and being used.
+
 | Variable | What it is | Default |
 |---|---|---|
 | `PROVIDER_BASE_URL` | Which gateway to talk to | `https://api.freerouter.com` |
