@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FreeRouter Chatbot Demo</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <h1>FreeRouter Chatbot Demo</h1>
+      <p class="sub">One API key. Zero lock-in. This chatbot runs on FreeRouter — and swaps to OpenRouter with two env vars.</p>
+      <p class="pill" id="provider-pill">Connecting…</p>
+    </header>
+
+    <section class="chat" id="messages" aria-live="polite"></section>
+
+    <form class="composer" id="composer">
+      <input id="input" type="text" placeholder="Ask anything…" autocomplete="off" maxlength="2000" />
+      <button type="submit" id="send">Send</button>
+    </form>
+    <p class="hint">Powered by <span id="hint-host">FreeRouter</span> · model <code id="hint-model">…</code> · your key stays on the server.</p>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

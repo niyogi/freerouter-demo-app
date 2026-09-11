@@ -1,0 +1,95 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #666;
+  --bubble-user: #2563eb;
+  --bubble-bot: #f1f2f4;
+  --border: #e2e2e2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121214;
+    --fg: #f0f0f0;
+    --muted: #a1a1a1;
+    --bubble-bot: #232326;
+    --border: #2e2e32;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.shell {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.hero h1 { margin: 0 0 8px; font-size: 1.6rem; }
+.sub { margin: 0 0 12px; color: var(--muted); }
+.pill {
+  display: inline-block;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 0;
+  overflow-y: auto;
+}
+
+.msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg.user { align-self: flex-end; background: var(--bubble-user); color: #fff; }
+.msg.bot { align-self: flex-start; background: var(--bubble-bot); color: var(--fg); }
+.msg.error { align-self: flex-start; background: transparent; border: 1px solid #e05353; color: #e05353; }
+.msg.typing { opacity: 0.6; font-style: italic; }
+
+.composer { display: flex; gap: 8px; }
+.composer input {
+  flex: 1;
+  padding: 12px 14px;
+  font-size: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.composer button {
+  padding: 0 20px;
+  font-size: 1rem;
+  border: 0;
+  border-radius: 12px;
+  background: var(--bubble-user);
+  color: #fff;
+  cursor: pointer;
+}
+.composer button:disabled { opacity: 0.5; cursor: default; }
+
+.hint { color: var(--muted); font-size: 0.8rem; }
+.hint code { font-size: 0.8rem; }
