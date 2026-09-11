@@ -57,6 +57,18 @@ function buildUpstreamBody(messages, { ip, ua }) {
   return body;
 }
 
+// One-word ads outcome for the console. Note the last case: when we asked
+// for ads but the proxy attached neither `ads` nor `ads_error`, the key's
+// Companion Ads toggle is off — the proxy ignores ad_request entirely.
+function describeAdsResult(data) {
+  if (!COMPANION_ADS) return 'ads=off';
+  if (data && Array.isArray(data.ads)) {
+    return data.ads.length > 0 ? `ads=fill(${data.ads.length})` : 'ads=empty';
+  }
+  if (data && data.ads_error) return `ads=${data.ads_error.code || 'error'}`;
+  return 'ads=not-attached(key-toggle-off?)';
+}
+
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -150,15 +162,9 @@ app.post('/api/chat', async (req, res) => {
   // when something is misconfigured, or nothing at all. Inference never
   // fails because of ads.
   const out = { reply };
-  let adsState = 'ads=off';
-  if (Array.isArray(data.ads)) {
-    out.ads = data.ads;
-    adsState = data.ads.length > 0 ? `ads=fill(${data.ads.length})` : 'ads=empty';
-  } else if (data.ads_error) {
-    out.ads_error = data.ads_error;
-    adsState = `ads=${data.ads_error.code || 'error'}`;
-  }
-  console.log(`[demo] ← ${upstream.status} in ${Date.now() - startedAt}ms ${adsState}`);
+  if (Array.isArray(data.ads)) out.ads = data.ads;
+  else if (data.ads_error) out.ads_error = data.ads_error;
+  console.log(`[demo] ← ${upstream.status} in ${Date.now() - startedAt}ms ${describeAdsResult(data)}`);
   res.json(out);
 });
 
@@ -174,6 +180,7 @@ if (require.main === module) {
 module.exports = app;
 module.exports.cleanMessages = cleanMessages;
 module.exports.buildUpstreamBody = buildUpstreamBody;
+module.exports.describeAdsResult = describeAdsResult;
 module.exports.config = {
   providerBaseUrl: PROVIDER_BASE_URL,
   providerHost: providerHost(),

@@ -14,7 +14,7 @@ process.env.PROVIDER_API_KEY = 'smoke-test-key';
 process.env.MODEL = 'openrouter/free';
 
 const app = require('./server');
-const { cleanMessages, buildUpstreamBody, config } = app;
+const { cleanMessages, buildUpstreamBody, describeAdsResult, config } = app;
 
 test('config reflects env (base URL, model, safe hostname)', () => {
   assert.equal(config.providerBaseUrl, 'https://upstream.example');
@@ -75,6 +75,35 @@ test('COMPANION_ADS=true attaches the playground placement request', () => {
   assert.equal(ad_request.placement, 'chat-compare-pc-web');
   assert.match(ad_request.session_id, /^sess_[0-9a-f]+$/);
   assert.equal(ad_request.ua, 'smoke-ua');
+});
+
+test('describeAdsResult names each outcome', () => {
+  assert.equal(describeAdsResult({ choices: [] }), 'ads=off');
+  assert.equal(describeAdsResult({ ads: [{ title: 'x' }] }), 'ads=off');
+});
+
+test('describeAdsResult with ads on distinguishes toggle-off silence', () => {
+  const { execFileSync } = require('node:child_process');
+  const script = `
+    const server = require('./server.js');
+    console.log(JSON.stringify([
+      server.describeAdsResult({ choices: [] }),
+      server.describeAdsResult({ ads: [{ title: 'x' }] }),
+      server.describeAdsResult({ ads: [] }),
+      server.describeAdsResult({ ads_error: { code: 'no_ad_network' } }),
+    ]));
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    cwd: __dirname,
+    env: { ...process.env, COMPANION_ADS: 'true' },
+    encoding: 'utf8',
+  });
+  assert.deepEqual(JSON.parse(out), [
+    'ads=not-attached(key-toggle-off?)',
+    'ads=fill(1)',
+    'ads=empty',
+    'ads=no_ad_network',
+  ]);
 });
 
 test('expected routes are wired', () => {
