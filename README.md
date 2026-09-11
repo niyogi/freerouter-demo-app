@@ -49,6 +49,7 @@ Open [http://localhost:3000](http://localhost:3000) and start chatting.
 | `PROVIDER_API_KEY` | Your key (**server-side only**, never committed) | — |
 | `MODEL` | Model id sent to the provider | `openrouter/free` (free tier) |
 | `COMPANION_ADS` | `true` shows a sponsored slot under each reply (FreeRouter only) | `false` |
+| `MONETIZABLE_KEYTERMS` | `true` hyperlinks the top 3 extracted keyterms in each reply (FreeRouter only) | `false` |
 | `PORT` | Local port | `3000` |
 
 > `.env` is git-ignored. Never commit a real key — that's the whole reason this demo has a server.
@@ -106,6 +107,7 @@ Any Node host works (Render, Fly.io, Railway, a VPS). Set `PROVIDER_BASE_URL`, `
 | `404` / model-not-found mentioning the model id | That provider doesn't know `MODEL` | Set `MODEL` to a valid id for the active provider |
 | `Could not reach …` / `502` | Wrong `PROVIDER_BASE_URL` or no network | Check the URL (include `https://`, no trailing path) |
 | No ad card with `COMPANION_ADS=true` | Key toggle off, no ad network configured, or no fill | Turn Companion Ads on for the key, add a network under Settings → Ad Networks, and confirm fills in the dashboard playground first |
+| No hyperlinks with `MONETIZABLE_KEYTERMS=true` | Key toggle off, extractor unconfigured, or nothing specific in the reply | Turn Monetizable Keyterms on for the key, confirm the operator configured the extractor + destination template, and ask about something product-specific |
 
 ## Companion Ads (optional)
 
@@ -117,6 +119,17 @@ FreeRouter keys can monetize with [Companion Ads](https://docs.freerouter.com/co
 The demo then attaches an `ad_request` using the same placement the FreeRouter playground previews with, and renders any fill as a labeled "Sponsored" card under the reply (clicks go through `clickUrl`, views fire `impUrl`). Empty fills and `ads_error` outcomes render nothing — the chat keeps working regardless.
 
 > Companion Ads is a FreeRouter-only feature. When you swap this demo to OpenRouter (or any non-FreeRouter endpoint), set `COMPANION_ADS=false` — other providers don't understand `ad_request`.
+
+## Monetizable Keyterms (optional)
+
+FreeRouter keys can return [Monetizable Keyterms](https://docs.freerouter.com/keyterms.html): scored entities (brands, products, model numbers) with a destination URL each, riding alongside the reply without ever failing inference. To try it in this demo:
+
+1. In the FreeRouter dashboard, turn **Monetizable Keyterms on** for your key. (The operator must also have configured the extractor model and destination template — otherwise replies carry `keyterms_error`.)
+2. Set `MONETIZABLE_KEYTERMS=true` in `.env` and restart.
+
+The demo then attaches a `link_request` capped at the top 3, and hyperlinks each returned span in the rendered reply post-render (first occurrence per term, never inside code blocks or existing links). Empty lists and `keyterms_error` outcomes change nothing — the chat keeps working regardless.
+
+> Like Companion Ads, this is a FreeRouter-only feature. When you swap this demo to OpenRouter (or any non-FreeRouter endpoint), set `MONETIZABLE_KEYTERMS=false` — other providers don't understand `link_request`.
 
 ## Links
 

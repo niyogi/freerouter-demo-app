@@ -148,6 +148,50 @@ function addAds(ads) {
   if (ads.length > 0) messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// Monetizable Keyterms: hyperlink the top candidates inside an already
+// rendered bot message. Walks text nodes only (never existing links, code,
+// or pre blocks), links the first occurrence of each of the top-3 spans,
+// and builds anchors with DOM APIs so model text can never inject markup.
+// URLs are restricted to http(s), same as rendered markdown links.
+function hyperlinkKeyterms(botDiv, keyterms) {
+  const terms = (Array.isArray(keyterms) ? keyterms : []).slice(0, 3);
+  if (!botDiv || !terms.length) return 0;
+  let linked = 0;
+  for (const t of terms) {
+    if (!t || typeof t.keyterm !== 'string' || !t.keyterm) continue;
+    if (typeof t.url !== 'string' || !/^https?:\/\//.test(t.url)) continue;
+    const needle = t.keyterm;
+    const walker = document.createTreeWalker(botDiv, NodeFilter.SHOW_TEXT);
+    let node = null;
+    let found = null;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (parent && parent.closest('a,code,pre')) continue;
+      const idx = node.nodeValue.indexOf(needle);
+      if (idx !== -1) {
+        found = { node, idx };
+        break;
+      }
+    }
+    if (!found) continue;
+    const { node: textNode, idx } = found;
+    const before = textNode.nodeValue.slice(0, idx);
+    const after = textNode.nodeValue.slice(idx + needle.length);
+    const anchor = document.createElement('a');
+    anchor.href = t.url;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener';
+    anchor.textContent = needle;
+    const parent = textNode.parentNode;
+    if (before) parent.insertBefore(document.createTextNode(before), textNode);
+    parent.insertBefore(anchor, textNode);
+    if (after) parent.insertBefore(document.createTextNode(after), textNode);
+    parent.removeChild(textNode);
+    linked += 1;
+  }
+  return linked;
+}
+
 function addError(text) {
   const div = document.createElement('div');
   div.className = 'msg error';
@@ -189,9 +233,10 @@ async function sendMessage(text) {
     if (!res.ok) {
       addError(data.error || 'Something went wrong.');
     } else {
-      addMessage('bot', data.reply);
+      const botDiv = addMessage('bot', data.reply);
       history.push({ role: 'assistant', content: data.reply });
       if (Array.isArray(data.ads)) addAds(data.ads);
+      if (Array.isArray(data.keyterms)) hyperlinkKeyterms(botDiv, data.keyterms);
     }
   } catch (err) {
     typing.remove();

@@ -14,7 +14,7 @@ process.env.PROVIDER_API_KEY = 'smoke-test-key';
 process.env.MODEL = 'openrouter/free';
 
 const app = require('./server');
-const { cleanMessages, buildUpstreamBody, describeAdsResult, config } = app;
+const { cleanMessages, buildUpstreamBody, describeAdsResult, describeKeytermsResult, config } = app;
 
 test('config reflects env (base URL, model, safe hostname)', () => {
   assert.equal(config.providerBaseUrl, 'https://upstream.example');
@@ -103,6 +103,59 @@ test('describeAdsResult with ads on distinguishes toggle-off silence', () => {
     'ads=fill(1)',
     'ads=empty',
     'ads=no_ad_network',
+  ]);
+});
+
+test('keyterms are off by default: no link_request sent', () => {
+  assert.equal(config.monetizableKeyterms, false);
+  assert.equal(config.keytermsMax, 3);
+  const body = buildUpstreamBody([{ role: 'user', content: 'hi' }], { ua: 'smoke-ua' });
+  assert.ok(!('link_request' in body), 'link_request must be absent when MONETIZABLE_KEYTERMS is off');
+});
+
+test('MONETIZABLE_KEYTERMS=true attaches a top-3 link request', () => {
+  const { execFileSync } = require('node:child_process');
+  const script = `
+    const server = require('./server.js');
+    const body = server.buildUpstreamBody([{ role: 'user', content: 'hi' }], { ua: 'smoke-ua' });
+    console.log(JSON.stringify({ config: server.config, link_request: body.link_request || null }));
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    cwd: __dirname,
+    env: { ...process.env, MONETIZABLE_KEYTERMS: 'true' },
+    encoding: 'utf8',
+  });
+  const { config: ktConfig, link_request } = JSON.parse(out);
+  assert.equal(ktConfig.monetizableKeyterms, true);
+  assert.deepEqual(link_request, { max_keyterms: 3 });
+});
+
+test('describeKeytermsResult names each outcome', () => {
+  assert.equal(describeKeytermsResult({ choices: [] }), 'keyterms=off');
+  assert.equal(describeKeytermsResult({ keyterms: [{ keyterm: 'x' }] }), 'keyterms=off');
+});
+
+test('describeKeytermsResult with keyterms on distinguishes toggle-off silence', () => {
+  const { execFileSync } = require('node:child_process');
+  const script = `
+    const server = require('./server.js');
+    console.log(JSON.stringify([
+      server.describeKeytermsResult({ choices: [] }),
+      server.describeKeytermsResult({ keyterms: [{ keyterm: 'a' }, { keyterm: 'b' }] }),
+      server.describeKeytermsResult({ keyterms: [] }),
+      server.describeKeytermsResult({ keyterms_error: { code: 'extractor_error' } }),
+    ]));
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    cwd: __dirname,
+    env: { ...process.env, MONETIZABLE_KEYTERMS: 'true' },
+    encoding: 'utf8',
+  });
+  assert.deepEqual(JSON.parse(out), [
+    'keyterms=not-attached(key-toggle-off?)',
+    'keyterms=linked(2)',
+    'keyterms=empty',
+    'keyterms=extractor_error',
   ]);
 });
 

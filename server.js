@@ -21,6 +21,12 @@ const PROVIDER_BASE_URL = String(process.env.PROVIDER_BASE_URL || 'https://api.f
 const PROVIDER_API_KEY = String(process.env.PROVIDER_API_KEY || '');
 const MODEL = String(process.env.MODEL || 'openrouter/free');
 const COMPANION_ADS = String(process.env.COMPANION_ADS || 'false').toLowerCase() === 'true';
+// Monetizable Keyterms (FreeRouter only): when true, each reply may carry
+// scored linkable entities, hyperlinked client-side post-render.
+const MONETIZABLE_KEYTERMS = String(process.env.MONETIZABLE_KEYTERMS || 'false').toLowerCase() === 'true';
+// How many top candidates to ask for (and to link). The proxy returns them
+// sorted best-first, so the client links at most this many spans.
+const KEYTERMS_MAX = 3;
 
 // Same registered slot the FreeRouter playground previews with, so a key
 // with Companion Ads on returns fills here too.
@@ -50,10 +56,17 @@ function buildAdRequest({ ip, ua }) {
   };
 }
 
+function buildLinkRequest() {
+  if (!MONETIZABLE_KEYTERMS) return null;
+  return { max_keyterms: KEYTERMS_MAX };
+}
+
 function buildUpstreamBody(messages, { ip, ua }) {
   const body = { model: MODEL, messages };
   const adRequest = buildAdRequest({ ip, ua });
   if (adRequest) body.ad_request = adRequest;
+  const linkRequest = buildLinkRequest();
+  if (linkRequest) body.link_request = linkRequest;
   return body;
 }
 
@@ -67,6 +80,17 @@ function describeAdsResult(data) {
   }
   if (data && data.ads_error) return `ads=${data.ads_error.code || 'error'}`;
   return 'ads=not-attached(key-toggle-off?)';
+}
+
+// One-word keyterms outcome for the console. Same idea as ads: when we
+// asked but the proxy attached neither field, the key toggle is off.
+function describeKeytermsResult(data) {
+  if (!MONETIZABLE_KEYTERMS) return 'keyterms=off';
+  if (data && Array.isArray(data.keyterms)) {
+    return data.keyterms.length > 0 ? `keyterms=linked(${data.keyterms.length})` : 'keyterms=empty';
+  }
+  if (data && data.keyterms_error) return `keyterms=${data.keyterms_error.code || 'error'}`;
+  return 'keyterms=not-attached(key-toggle-off?)';
 }
 
 const app = express();
@@ -86,9 +110,9 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// Safe for the browser: hostname + model + ads flag only. Never the key.
+// Safe for the browser: hostname + model + feature flags only. Never the key.
 app.get('/api/config', (req, res) => {
-  res.json({ providerHost: providerHost(), model: MODEL, companionAds: COMPANION_ADS });
+  res.json({ providerHost: providerHost(), model: MODEL, companionAds: COMPANION_ADS, monetizableKeyterms: MONETIZABLE_KEYTERMS });
 });
 
 function cleanMessages(input) {
@@ -160,18 +184,21 @@ app.post('/api/chat', async (req, res) => {
   }
   // Companion Ads rides alongside the reply: an `ads` fill, an `ads_error`
   // when something is misconfigured, or nothing at all. Inference never
-  // fails because of ads.
+  // fails because of ads. Same for keyterms: a `keyterms` list (at most
+  // KEYTERMS_MAX, best first), a `keyterms_error`, or nothing.
   const out = { reply };
   if (Array.isArray(data.ads)) out.ads = data.ads;
   else if (data.ads_error) out.ads_error = data.ads_error;
-  console.log(`[demo] ← ${upstream.status} in ${Date.now() - startedAt}ms ${describeAdsResult(data)}`);
+  if (Array.isArray(data.keyterms)) out.keyterms = data.keyterms.slice(0, KEYTERMS_MAX);
+  else if (data.keyterms_error) out.keyterms_error = data.keyterms_error;
+  console.log(`[demo] ← ${upstream.status} in ${Date.now() - startedAt}ms ${describeAdsResult(data)} ${describeKeytermsResult(data)}`);
   res.json(out);
 });
 
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`[demo] listening on http://localhost:${PORT}`);
-    console.log(`[demo] provider=${providerHost()} model=${MODEL} companionAds=${COMPANION_ADS ? 'on' : 'off'} key=${PROVIDER_API_KEY ? 'set' : 'MISSING'}`);
+    console.log(`[demo] provider=${providerHost()} model=${MODEL} companionAds=${COMPANION_ADS ? 'on' : 'off'} keyterms=${MONETIZABLE_KEYTERMS ? 'on' : 'off'} key=${PROVIDER_API_KEY ? 'set' : 'MISSING'}`);
     if (!PROVIDER_API_KEY) console.log('[demo] hint: copy .env.example to .env and add your key, then restart.');
   });
 }
@@ -180,11 +207,15 @@ if (require.main === module) {
 module.exports = app;
 module.exports.cleanMessages = cleanMessages;
 module.exports.buildUpstreamBody = buildUpstreamBody;
+module.exports.buildLinkRequest = buildLinkRequest;
 module.exports.describeAdsResult = describeAdsResult;
+module.exports.describeKeytermsResult = describeKeytermsResult;
 module.exports.config = {
   providerBaseUrl: PROVIDER_BASE_URL,
   providerHost: providerHost(),
   model: MODEL,
   companionAds: COMPANION_ADS,
   adsPlacement: ADS_PLACEMENT,
+  monetizableKeyterms: MONETIZABLE_KEYTERMS,
+  keytermsMax: KEYTERMS_MAX,
 };
