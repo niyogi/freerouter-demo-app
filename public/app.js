@@ -20,6 +20,51 @@ function addMessage(role, text) {
   return div;
 }
 
+// Companion Ads slot. Uses clickUrl for clicks and fires impUrl on view,
+// per the FreeRouter ads contract. Renders nothing on empty/error fills.
+function addAds(ads) {
+  for (const ad of ads) {
+    if (!ad || typeof ad !== 'object') continue;
+    const card = document.createElement('div');
+    card.className = 'msg ad';
+    const label = document.createElement('div');
+    label.className = 'ad-label';
+    label.textContent = 'Sponsored';
+    card.appendChild(label);
+    if (ad.brandName || ad.title) {
+      const head = document.createElement('div');
+      head.className = 'ad-head';
+      head.textContent = ad.title || ad.brandName;
+      card.appendChild(head);
+    }
+    if (ad.adText) {
+      const body = document.createElement('div');
+      body.className = 'ad-text';
+      body.textContent = ad.adText;
+      card.appendChild(body);
+    }
+    if (ad.clickUrl) {
+      const cta = document.createElement('a');
+      cta.href = ad.clickUrl;
+      cta.target = '_blank';
+      cta.rel = 'noopener sponsored';
+      cta.className = 'ad-cta';
+      cta.textContent = ad.cta || 'Learn more';
+      card.appendChild(cta);
+    }
+    if (ad.impUrl) {
+      const imp = document.createElement('img');
+      imp.src = ad.impUrl;
+      imp.alt = '';
+      imp.width = 1;
+      imp.height = 1;
+      card.appendChild(imp);
+    }
+    messagesEl.appendChild(card);
+  }
+  if (ads.length > 0) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 function addError(text) {
   const div = document.createElement('div');
   div.className = 'msg error';
@@ -65,6 +110,7 @@ form.addEventListener('submit', async (e) => {
     } else {
       addMessage('bot', data.reply);
       history.push({ role: 'assistant', content: data.reply });
+      if (Array.isArray(data.ads)) addAds(data.ads);
     }
   } catch (err) {
     typing.remove();

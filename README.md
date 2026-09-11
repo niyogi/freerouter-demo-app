@@ -48,6 +48,7 @@ Open [http://localhost:3000](http://localhost:3000) and start chatting.
 | `PROVIDER_BASE_URL` | Which gateway to talk to | `https://api.freerouter.com` |
 | `PROVIDER_API_KEY` | Your key (**server-side only**, never committed) | — |
 | `MODEL` | Model id sent to the provider | `openrouter/free` (free tier) |
+| `COMPANION_ADS` | `true` shows a sponsored slot under each reply (FreeRouter only) | `false` |
 | `PORT` | Local port | `3000` |
 
 > `.env` is git-ignored. Never commit a real key — that's the whole reason this demo has a server.
@@ -104,6 +105,18 @@ Any Node host works (Render, Fly.io, Railway, a VPS). Set `PROVIDER_BASE_URL`, `
 | `404` on `/v1/chat/completions` | Key's API shape isn't `openai` | Set the key's shape to `openai` (see step 2) |
 | `404` / model-not-found mentioning the model id | That provider doesn't know `MODEL` | Set `MODEL` to a valid id for the active provider |
 | `Could not reach …` / `502` | Wrong `PROVIDER_BASE_URL` or no network | Check the URL (include `https://`, no trailing path) |
+| No ad card with `COMPANION_ADS=true` | Key toggle off, no ad network configured, or no fill | Turn Companion Ads on for the key, add a network under Settings → Ad Networks, and confirm fills in the dashboard playground first |
+
+## Companion Ads (optional)
+
+FreeRouter keys can monetize with [Companion Ads](https://docs.freerouter.com/companion-ads.html): a sponsored slot that rides alongside each reply without ever failing inference. To try it in this demo:
+
+1. In the FreeRouter dashboard, turn **Companion Ads on** for your key and configure an ad network under **Settings → Ad Networks** (you'll need a publisher key from the network — Gravity is supported today). Without both steps, no ad returns.
+2. Set `COMPANION_ADS=true` in `.env` and restart.
+
+The demo then attaches an `ad_request` using the same placement the FreeRouter playground previews with, and renders any fill as a labeled "Sponsored" card under the reply (clicks go through `clickUrl`, views fire `impUrl`). Empty fills and `ads_error` outcomes render nothing — the chat keeps working regardless.
+
+> Companion Ads is a FreeRouter-only feature. When you swap this demo to OpenRouter (or any non-FreeRouter endpoint), set `COMPANION_ADS=false` — other providers don't understand `ad_request`.
 
 ## Links
 
