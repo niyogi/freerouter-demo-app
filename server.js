@@ -108,6 +108,8 @@ app.post('/api/chat', async (req, res) => {
   const upstreamBody = buildUpstreamBody(messages, {
     ua: req.get('User-Agent') || '',
   });
+  const startedAt = Date.now();
+  console.log(`[demo] chat → ${providerHost()} model=${MODEL} messages=${messages.length}${upstreamBody.ad_request ? ` ad_request(placement=${upstreamBody.ad_request.placement})` : ''}`);
 
   let upstream;
   try {
@@ -134,6 +136,7 @@ app.post('/api/chat', async (req, res) => {
     const message =
       (data && data.error && (data.error.message || data.error.code)) ||
       `Upstream error (HTTP ${upstream.status}).`;
+    console.log(`[demo] ← ${upstream.status} in ${Date.now() - startedAt}ms error`);
     return res.status(upstream.status).json({ error: String(message).slice(0, 500) });
   }
   const reply =
@@ -147,16 +150,23 @@ app.post('/api/chat', async (req, res) => {
   // when something is misconfigured, or nothing at all. Inference never
   // fails because of ads.
   const out = { reply };
-  if (Array.isArray(data.ads)) out.ads = data.ads;
-  else if (data.ads_error) out.ads_error = data.ads_error;
+  let adsState = 'ads=off';
+  if (Array.isArray(data.ads)) {
+    out.ads = data.ads;
+    adsState = data.ads.length > 0 ? `ads=fill(${data.ads.length})` : 'ads=empty';
+  } else if (data.ads_error) {
+    out.ads_error = data.ads_error;
+    adsState = `ads=${data.ads_error.code || 'error'}`;
+  }
+  console.log(`[demo] ← ${upstream.status} in ${Date.now() - startedAt}ms ${adsState}`);
   res.json(out);
 });
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Chatbot demo listening on http://localhost:${PORT}`);
-    console.log(`Provider: ${providerHost()} | model: ${MODEL}`);
-    if (!PROVIDER_API_KEY) console.log('Note: PROVIDER_API_KEY is not set — /api/chat will explain how to fix it.');
+    console.log(`[demo] listening on http://localhost:${PORT}`);
+    console.log(`[demo] provider=${providerHost()} model=${MODEL} companionAds=${COMPANION_ADS ? 'on' : 'off'} key=${PROVIDER_API_KEY ? 'set' : 'MISSING'}`);
+    if (!PROVIDER_API_KEY) console.log('[demo] hint: copy .env.example to .env and add your key, then restart.');
   });
 }
 
