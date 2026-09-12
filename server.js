@@ -16,9 +16,19 @@ const crypto = require('crypto');
 // Env precedence: real environment > demo-github-app/.env > repo-root
 // .env (shared defaults). dotenv never overrides an already-set var, so
 // the demo dir loads first and the root only fills gaps. Missing files
-// are silently ignored.
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+// are silently ignored. presetKeys is snapshotted first so the startup
+// env report can say where each value came from.
+const presetKeys = new Set(Object.keys(process.env));
+const demoEnv = require('dotenv').config({ path: path.join(__dirname, '.env') });
+const rootEnv = require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const demoEnvKeys = new Set(Object.keys((demoEnv && demoEnv.parsed) || {}));
+const rootEnvKeys = new Set(Object.keys((rootEnv && rootEnv.parsed) || {}));
+function envSource(name) {
+  if (presetKeys.has(name)) return 'environment';
+  if (demoEnvKeys.has(name)) return 'demo .env';
+  if (rootEnvKeys.has(name)) return 'root .env';
+  return 'default';
+}
 const express = require('express');
 
 const PORT = Number(process.env.PORT || 3000);
@@ -32,6 +42,11 @@ const MONETIZABLE_KEYTERMS = String(process.env.MONETIZABLE_KEYTERMS || 'false')
 // How many top candidates to ask for (and to link). The proxy returns them
 // sorted best-first, so the client links at most this many spans.
 const KEYTERMS_MAX = 3;
+// Behind a reverse proxy you control (Render, nginx, …), req.ip is the
+// proxy — set TRUST_PROXY=true so Express reads the client from
+// X-Forwarded-For instead. Leave false for direct use: trusting the header
+// otherwise lets any client spoof its IP and poison ad geo/fraud checks.
+const TRUST_PROXY = String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true';
 
 // Same registered slot the FreeRouter playground previews with, so a key
 // with Companion Ads on returns fills here too.
@@ -82,6 +97,17 @@ function buildUpstreamBody(messages, { ip, ua }) {
 // can't spoof it via X-Forwarded-For. Loopback and LAN addresses (local
 // testing) fall back to the server's resolved public IP — same egress the
 // browser uses — instead of sending 127.0.0.1, which Gravity drops.
+// Last-octet-masked IP for console logs: enough to compare against the
+// browser's public IP when debugging wrong-IP reports, not enough to PII.
+function maskIp(ip) {
+  const s = String(ip || '');
+  if (!s) return 'none';
+  if (s.includes(':')) return `${s.split(':').slice(0, 3).join(':')}:…`;
+  const parts = s.split('.');
+  if (parts.length !== 4) return 'invalid';
+  return `${parts.slice(0, 3).join('.')}.xxx`;
+}
+
 function clientIp(req) {
   const raw = String((req && req.ip) || '');
   const ip = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
@@ -116,6 +142,7 @@ function describeKeytermsResult(data) {
 
 const app = express();
 app.disable('x-powered-by');
+if (TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -163,13 +190,15 @@ app.post('/api/chat', async (req, res) => {
 
   // End-user context for ads: the browser IP + UA. buildAdRequest falls
   // back to the server's resolved public IP when the browser is local.
+  // The log shows the masked address actually sent, so a wrong-IP report
+  // can be checked against the browser's public IP without logging PII.
   const adIp = clientIp(req);
   const upstreamBody = buildUpstreamBody(messages, {
     ip: adIp,
     ua: req.get('User-Agent') || '',
   });
   const startedAt = Date.now();
-  console.log(`[demo] chat → ${providerHost()} model=${MODEL} messages=${messages.length}${upstreamBody.ad_request ? ` ad_request(placement=${upstreamBody.ad_request.placement} ip=${adIp ? 'client' : 'public-fallback'})` : ''}`);
+  console.log(`[demo] chat → ${providerHost()} model=${MODEL} messages=${messages.length}${upstreamBody.ad_request ? ` ad_request(placement=${upstreamBody.ad_request.placement} ip=${adIp ? `client:${maskIp(adIp)}` : `fallback:${maskIp(publicIp)}`})` : ''}`);
 
   let upstream;
   try {
@@ -219,9 +248,32 @@ app.post('/api/chat', async (req, res) => {
   res.json(out);
 });
 
+// Effective config with its source per var. Secrets render as set/unset
+// with length only — never the value.
+function describeEnv() {
+  const vars = [
+    { name: 'PORT', fallback: '3000' },
+    { name: 'PROVIDER_BASE_URL', fallback: 'https://api.freerouter.com' },
+    { name: 'PROVIDER_API_KEY', secret: true },
+    { name: 'MODEL', fallback: 'openrouter/free' },
+    { name: 'COMPANION_ADS', fallback: 'false' },
+    { name: 'MONETIZABLE_KEYTERMS', fallback: 'false' },
+    { name: 'TRUST_PROXY', fallback: 'false' },
+  ];
+  return vars.map(({ name, fallback, secret }) => {
+    const v = process.env[name];
+    const shown = v == null || v === ''
+      ? `<unset → ${fallback != null ? fallback : '(required)'}>`
+      : (secret ? `<set:${String(v).length} chars>` : v);
+    return `  ${name}=${shown} (${envSource(name)})`;
+  });
+}
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`[demo] listening on http://localhost:${PORT}`);
+    console.log('[demo] env:');
+    for (const line of describeEnv()) console.log(`[demo]${line}`);
     console.log(`[demo] provider=${providerHost()} model=${MODEL} companionAds=${COMPANION_ADS ? 'on' : 'off'} keyterms=${MONETIZABLE_KEYTERMS ? 'on' : 'off'} key=${PROVIDER_API_KEY ? 'set' : 'MISSING'}`);
     if (!PROVIDER_API_KEY) console.log('[demo] hint: copy .env.example to .env and add your key, then restart.');
   });
@@ -231,6 +283,9 @@ if (require.main === module) {
 module.exports = app;
 module.exports.cleanMessages = cleanMessages;
 module.exports.clientIp = clientIp;
+module.exports.maskIp = maskIp;
+module.exports.envSource = envSource;
+module.exports.describeEnv = describeEnv;
 module.exports.buildUpstreamBody = buildUpstreamBody;
 module.exports.buildLinkRequest = buildLinkRequest;
 module.exports.describeAdsResult = describeAdsResult;
@@ -243,4 +298,5 @@ module.exports.config = {
   adsPlacement: ADS_PLACEMENT,
   monetizableKeyterms: MONETIZABLE_KEYTERMS,
   keytermsMax: KEYTERMS_MAX,
+  trustProxy: TRUST_PROXY,
 };

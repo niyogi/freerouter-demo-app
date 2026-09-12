@@ -14,7 +14,7 @@ process.env.PROVIDER_API_KEY = 'smoke-test-key';
 process.env.MODEL = 'openrouter/free';
 
 const app = require('./server');
-const { cleanMessages, clientIp, buildUpstreamBody, describeAdsResult, describeKeytermsResult, config } = app;
+const { cleanMessages, clientIp, maskIp, envSource, describeEnv, buildUpstreamBody, describeAdsResult, describeKeytermsResult, config } = app;
 
 test('config reflects env (base URL, model, safe hostname)', () => {
   assert.equal(config.providerBaseUrl, 'https://upstream.example');
@@ -186,6 +186,40 @@ test('COMPANION_ADS=true forwards the client IP into ad_request', () => {
   const { withClient, fallbackIp } = JSON.parse(out);
   assert.equal(withClient.ip, '203.0.113.7', 'browser IP must reach Gravity, not the server IP');
   assert.equal(typeof fallbackIp, 'string', 'local browsers fall back to the resolved public IP');
+});
+
+test('maskIp hides the last octet, never the shape', () => {
+  assert.equal(maskIp('203.0.113.7'), '203.0.113.xxx');
+  assert.equal(maskIp(''), 'none');
+  assert.equal(maskIp(null), 'none');
+  assert.equal(maskIp('not-an-ip'), 'invalid');
+  assert.match(maskIp('2001:db8:abcd:0012::1'), /^2001:db8:abcd:/);
+});
+
+test('envSource names where each var came from', () => {
+  assert.equal(envSource('PROVIDER_BASE_URL'), 'environment');
+  assert.equal(envSource('DEFINITELY_NOT_SET_VAR_XYZ'), 'default');
+});
+
+test('describeEnv lists every var without leaking the key', () => {
+  const lines = describeEnv();
+  assert.equal(lines.length, 7);
+  assert.ok(lines.every((l) => /^(  )[A-Z_]+=.* \((environment|demo \.env|root \.env|default)\)$/.test(l)));
+  const keyLine = lines.find((l) => l.includes('PROVIDER_API_KEY'));
+  assert.match(keyLine, /<set:\d+ chars>/);
+  assert.ok(!lines.join('\n').includes('smoke-test-key'), 'secret value must never render');
+});
+
+test('trust proxy stays off unless TRUST_PROXY=true', () => {
+  assert.equal(app.get('trust proxy'), false);
+  const { execFileSync } = require('node:child_process');
+  const script = `console.log(JSON.stringify(require('./server.js').get('trust proxy')));`;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    cwd: __dirname,
+    env: { ...process.env, TRUST_PROXY: 'true' },
+    encoding: 'utf8',
+  });
+  assert.equal(JSON.parse(out), 1);
 });
 
 test('expected routes are wired', () => {
