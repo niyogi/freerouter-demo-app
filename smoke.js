@@ -170,6 +170,28 @@ test('clientIp prefers the browser IP, never loopback/LAN', () => {
   assert.equal(clientIp(null), '');
 });
 
+test('spoofed forwarding headers are ignored without TRUST_PROXY', () => {
+  const fakeReq = { ip: '127.0.0.1', headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' } };
+  assert.equal(clientIp(fakeReq), '', 'direct clients must not spoof via X-Forwarded-For');
+});
+
+test('TRUST_PROXY reads the client from X-Forwarded-For', () => {
+  const { execFileSync } = require('node:child_process');
+  const script = `
+    const server = require('./server.js');
+    console.log(JSON.stringify({
+      direct: server.clientIp({ ip: '127.0.0.1', headers: {} }),
+      forwarded: server.clientIp({ ip: '10.0.0.1', headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' } }),
+    }));
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    cwd: __dirname,
+    env: { ...process.env, TRUST_PROXY: 'true' },
+    encoding: 'utf8',
+  });
+  assert.deepEqual(JSON.parse(out), { direct: '', forwarded: '203.0.113.9' });
+});
+
 test('COMPANION_ADS=true forwards the client IP into ad_request', () => {
   const { execFileSync } = require('node:child_process');
   const script = `

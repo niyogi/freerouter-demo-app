@@ -30,6 +30,7 @@ function envSource(name) {
   return 'default';
 }
 const express = require('express');
+const requestIp = require('request-ip');
 
 const PORT = Number(process.env.PORT || 3000);
 const PROVIDER_BASE_URL = String(process.env.PROVIDER_BASE_URL || 'https://api.freerouter.com').replace(/\/+$/, '');
@@ -109,7 +110,18 @@ function maskIp(ip) {
 }
 
 function clientIp(req) {
-  const raw = String((req && req.ip) || '');
+  // With TRUST_PROXY, request-ip reads the client from X-Forwarded-For /
+  // CF-Connecting-IP / True-Client-IP (leftmost = original client);
+  // without it, only the TCP source is used so a direct client can't
+  // spoof its IP via headers.
+  let raw = '';
+  try {
+    raw = TRUST_PROXY && req
+      ? String(requestIp.getClientIp(req) || '')
+      : String((req && (req.ip || (req.socket && req.socket.remoteAddress))) || '');
+  } catch {
+    raw = '';
+  }
   const ip = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
   if (!ip) return '';
   if (ip === '127.0.0.1' || ip === '::1') return '';
