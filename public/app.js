@@ -117,10 +117,34 @@ function addAds(ads) {
     label.className = 'ad-label';
     label.textContent = 'Sponsored';
     card.appendChild(label);
-    if (ad.brandName || ad.title) {
+    // Brand row (favicon + advertiser) mirrors the playground's
+    // "title (brand)" attribution — without it, content-style ads read as
+    // bot text with no source.
+    if (ad.brandName) {
+      const brandRow = document.createElement('div');
+      brandRow.className = 'ad-brandrow';
+      if (typeof ad.favicon === 'string' && /^https?:\/\//.test(ad.favicon)) {
+        const icon = document.createElement('img');
+        icon.className = 'ad-favicon';
+        icon.alt = '';
+        icon.width = 16;
+        icon.height = 16;
+        icon.referrerPolicy = 'no-referrer';
+        icon.addEventListener('error', () => icon.remove());
+        icon.src = ad.favicon;
+        brandRow.appendChild(icon);
+      }
+      const brand = document.createElement('span');
+      brand.className = 'ad-brand';
+      brand.textContent = ad.brandName;
+      brandRow.appendChild(brand);
+      card.appendChild(brandRow);
+    }
+    const title = ad.title && ad.title !== ad.brandName ? ad.title : (!ad.brandName ? ad.title : '');
+    if (title) {
       const head = document.createElement('div');
       head.className = 'ad-head';
-      head.textContent = ad.title || ad.brandName;
+      head.textContent = title;
       card.appendChild(head);
     }
     if (ad.adText) {
