@@ -49,10 +49,15 @@ function renderMarkdown(src) {
   });
   const html = [];
   let list = [];
+  let olist = [];
   let para = [];
   const flushList = () => {
     if (list.length) html.push(`<ul>${list.map((i) => `<li>${renderInline(i)}</li>`).join('')}</ul>`);
     list = [];
+  };
+  const flushOlist = () => {
+    if (olist.length) html.push(`<ol>${olist.map((i) => `<li>${renderInline(i)}</li>`).join('')}</ol>`);
+    olist = [];
   };
   const flushPara = () => {
     if (para.length) html.push(`<p>${para.map(renderInline).join('<br />')}</p>`);
@@ -63,10 +68,19 @@ function renderMarkdown(src) {
     const listMatch = trimmed.match(/^[-*]\s+(.+)/);
     if (listMatch) {
       flushPara();
+      flushOlist();
       list.push(listMatch[1]);
       continue;
     }
+    const olistMatch = trimmed.match(/^\d+\.\s+(.+)/);
+    if (olistMatch) {
+      flushPara();
+      flushList();
+      olist.push(olistMatch[1]);
+      continue;
+    }
     flushList();
+    flushOlist();
     if (!trimmed) {
       flushPara();
       continue;
@@ -75,7 +89,7 @@ function renderMarkdown(src) {
     if (heading) {
       flushPara();
       const level = heading[1].length + 2;
-      html.push(`<h${level}>${renderInline(heading[2])}</h${level}></h${level}>`);
+      html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
       continue;
     }
     const codeRef = trimmed.match(/^\u0000\d+\u0000$/);
@@ -87,6 +101,7 @@ function renderMarkdown(src) {
     para.push(trimmed);
   }
   flushList();
+  flushOlist();
   flushPara();
   return html.join('').replace(/\u0000(\d+)\u0000/g, (m, i) => blocks[Number(i)]);
 }
@@ -98,13 +113,23 @@ function addAds(ads) {
     if (!ad || typeof ad !== 'object') continue;
     const card = document.createElement('div');
     card.className = 'msg ad';
-    // The whole card is the click target (opens clickUrl); the visible CTA
-    // is a styled span, not a nested link, so there is exactly one target.
-    if (ad.clickUrl) {
+    // Click destination prefers the tracked clickUrl; some fills only
+    // carry the raw landing-page `url` (different campaigns fill per
+    // IP/geo, so local and remote can legitimately disagree). Falling back
+    // keeps the CTA visible — clicks just go untracked, which the console
+    // warning says out loud.
+    const isHttpUrl = (u) => typeof u === 'string' && /^https?:\/\//.test(u);
+    const dest = isHttpUrl(ad.clickUrl) ? ad.clickUrl : (isHttpUrl(ad.url) ? ad.url : '');
+    if (dest && dest !== ad.clickUrl) {
+      console.warn('[demo ads] fill has no clickUrl; linking direct url (clicks untracked).');
+    }
+    // The whole card is the click target; the visible CTA is a styled
+    // span, not a nested link, so there is exactly one target.
+    if (dest) {
       card.classList.add('clickable');
       card.setAttribute('role', 'link');
       card.setAttribute('tabindex', '0');
-      const open = () => window.open(ad.clickUrl, '_blank', 'noopener');
+      const open = () => window.open(dest, '_blank', 'noopener');
       card.addEventListener('click', open);
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -154,10 +179,11 @@ function addAds(ads) {
       body.textContent = ad.adText;
       card.appendChild(body);
     }
-    // CTA is a styled span, not a nested link: the whole tile opens
-    // clickUrl (nested anchors would double-open). Arrow matches the
-    // reference tile.
-    if (ad.clickUrl) {
+    // CTA is a styled span, not a nested link: the whole tile opens the
+    // destination (nested anchors would double-open). Arrow matches the
+    // reference tile. Shows whenever there is somewhere to go — a missing
+    // button means the fill had neither clickUrl nor url, not a render bug.
+    if (dest) {
       const cta = document.createElement('span');
       cta.className = 'ad-cta';
       cta.textContent = `${ad.cta || 'Learn more'} `;

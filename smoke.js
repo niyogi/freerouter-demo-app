@@ -244,6 +244,37 @@ test('trust proxy stays off unless TRUST_PROXY=true', () => {
   assert.equal(JSON.parse(out), 1);
 });
 
+// The markdown renderer is pure string code inside the browser bundle —
+// load just those functions into a vm context (same trick as
+// app/tests/keys-view.test.js) so render regressions pin here.
+function loadMarkdownRenderer() {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const src = fs.readFileSync(require('node:path').join(__dirname, 'public', 'app.js'), 'utf8');
+  const pick = (name) => {
+    const m = src.match(new RegExp(`function ${name}[\\s\\S]*?^}`, 'm'));
+    assert.ok(m, `function ${name} must exist in public/app.js`);
+    return m[0];
+  };
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(`${pick('escapeHtml')}\n${pick('renderInline')}\n${pick('renderMarkdown')}`, ctx);
+  return ctx;
+}
+
+test('markdown renderer closes headings exactly once', () => {
+  const { renderMarkdown } = loadMarkdownRenderer();
+  assert.equal(renderMarkdown('## Header here'), '<h4>Header here</h4>');
+});
+
+test('markdown renderer builds ordered lists', () => {
+  const { renderMarkdown } = loadMarkdownRenderer();
+  const html = renderMarkdown('1. **Wilson Clash 108** - control.\n2. Head Ti.S6 - light.');
+  assert.match(html, /^<ol>.*<\/ol>$/);
+  assert.ok(html.includes('<li><strong>Wilson Clash 108</strong> - control.</li>'));
+  assert.ok(!html.includes('<br />'), 'list items must not collapse into a paragraph');
+});
+
 test('expected routes are wired', () => {
   const routes = [];
   for (const layer of app._router.stack) {

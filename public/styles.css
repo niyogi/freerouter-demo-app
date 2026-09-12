@@ -116,6 +116,7 @@ body {
 }
 .msg.bot code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; }
 .msg.bot ul { margin: 0 0 8px; padding-left: 20px; }
+.msg.bot ol { margin: 0 0 8px; padding-left: 20px; }
 .msg.bot h3, .msg.bot h4, .msg.bot h5 { margin: 8px 0 4px; font-size: 1rem; }
 .msg.bot a { color: var(--bubble-user); }
 
