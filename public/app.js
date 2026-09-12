@@ -11,10 +11,53 @@ const pill = document.getElementById('provider-pill');
 
 const history = [];
 
+// Assistant rendering via the markdown-it package (vendored at
+// /vendor/markdown-it.umd.min.js). Same security posture as the old
+// built-in renderer: raw HTML is escaped (html:false), links are limited
+// to http(s)/mailto (validateLink), outbound links open in a new tab.
+// Falls back to the built-in minimal renderer when the bundle is missing
+// (e.g. `npm install` was skipped) so the chat never goes blank.
+let mdIt = null;
+function getMarkdown() {
+  if (mdIt) return mdIt;
+  try {
+    if (typeof window === 'undefined' || !window.markdownit) return null;
+    mdIt = window.markdownit({
+      html: false,
+      linkify: true,
+      typographer: false,
+      validateLink: (url) => /^https?:\/\//i.test(url) || /^mailto:/i.test(url),
+    });
+    const defaultLinkOpen = mdIt.renderer.rules.link_open;
+    mdIt.renderer.rules.link_open = function (tokens, idx, options, env, self) {
+      tokens[idx].attrSet('target', '_blank');
+      tokens[idx].attrSet('rel', 'noopener');
+      if (defaultLinkOpen) return defaultLinkOpen(tokens, idx, options, env, self);
+      return self.renderToken(tokens, idx, options);
+    };
+  } catch {
+    return null;
+  }
+  return mdIt;
+}
+
+function renderAssistant(text) {
+  const src = String(text == null ? '' : text);
+  const md = getMarkdown();
+  if (md) {
+    try {
+      return md.render(src);
+    } catch {
+      // fall through to built-in
+    }
+  }
+  return renderMarkdown(src);
+}
+
 function addMessage(role, text) {
   const div = document.createElement('div');
   div.className = `msg ${role === 'user' ? 'user' : 'bot'}`;
-  if (role === 'bot' && text !== 'Thinking…') div.innerHTML = renderMarkdown(text);
+  if (role === 'bot' && text !== 'Thinking…') div.innerHTML = renderAssistant(text);
   else div.textContent = text;
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -293,7 +336,15 @@ async function sendMessage(text) {
     } else {
       const botDiv = addMessage('bot', data.reply);
       history.push({ role: 'assistant', content: data.reply });
-      if (Array.isArray(data.ads)) addAds(data.ads);
+      // Ads narration: addAds renders SPONSORED unconditionally per ad
+      // object, so a missing label means no ad arrived (or the browser
+      // hid it) — never a render-logic skip. Say so in the console.
+      if (Array.isArray(data.ads)) {
+        if (!data.ads.length) console.info('[demo ads] no fill (ads: []) — nothing to render.');
+        addAds(data.ads);
+      } else if (data.ads_error) {
+        console.warn(`[demo ads] ${data.ads_error.code || 'error'} — ${data.ads_error.message || ''}`);
+      }
       if (Array.isArray(data.keyterms)) hyperlinkKeyterms(botDiv, data.keyterms);
     }
   } catch (err) {

@@ -157,6 +157,9 @@ app.disable('x-powered-by');
 if (TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+// Vendor the markdown-it browser bundle from our own dependency (no CDN)
+// so the chat renderer works offline and stays version-pinned.
+app.use('/vendor', express.static(path.join(__dirname, 'node_modules', 'markdown-it', 'dist', 'browser')));
 
 function providerHost() {
   try {

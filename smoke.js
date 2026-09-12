@@ -267,6 +267,53 @@ test('markdown renderer closes headings exactly once', () => {
   assert.equal(renderMarkdown('## Header here'), '<h4>Header here</h4>');
 });
 
+function loadAssistantRenderer(withMarkdownIt) {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const src = fs.readFileSync(require('node:path').join(__dirname, 'public', 'app.js'), 'utf8');
+  const pick = (name) => {
+    const m = src.match(new RegExp(`function ${name}[\\s\\S]*?^}`, 'm'));
+    assert.ok(m, `function ${name} must exist in public/app.js`);
+    return m[0];
+  };
+  const sandbox = {};
+  if (withMarkdownIt) sandbox.window = { markdownit: require('markdown-it') };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    `${pick('escapeHtml')}\n${pick('renderInline')}\n${pick('renderMarkdown')}\nlet mdIt = null;\n${pick('getMarkdown')}\n${pick('renderAssistant')}`,
+    sandbox,
+  );
+  return sandbox;
+}
+
+test('assistant replies render through markdown-it when bundled', () => {
+  const { renderAssistant } = loadAssistantRenderer(true);
+  assert.match(renderAssistant('# Hello'), /<h1>Hello<\/h1>/);
+  assert.match(renderAssistant('| a | b |\n|---|---|\n| 1 | 2 |'), /<table>/);
+  const link = renderAssistant('[guide](https://example.com/x)');
+  assert.ok(link.includes('target="_blank"') && link.includes('rel="noopener"'), 'outbound links open safely');
+  const evil = renderAssistant('[x](javascript:alert(1))');
+  assert.ok(!evil.includes('<a'), 'javascript: links must not become anchors');
+  const raw = renderAssistant('<script>alert(1)</script>');
+  assert.ok(!raw.includes('<script>') && raw.includes('&lt;script&gt;'), 'raw HTML must stay escaped');
+});
+
+test('assistant replies fall back to the built-in renderer without the bundle', () => {
+  const { renderAssistant } = loadAssistantRenderer(false);
+  assert.equal(renderAssistant('**x**'), '<p><strong>x</strong></p>');
+});
+
+test('markdown-it vendor bundle is pinned and served', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dist = path.join(__dirname, 'node_modules', 'markdown-it', 'dist', 'browser', 'markdown-it.umd.min.js');
+  assert.ok(fs.existsSync(dist), 'npm install must provide the vendored browser bundle');
+  const pinned = require('./package.json').dependencies['markdown-it'];
+  const installed = require('markdown-it/package.json').version;
+  assert.ok(pinned, 'markdown-it must be a declared dependency');
+  assert.ok(installed.startsWith(pinned.replace(/^\^/, '').split('.')[0] + '.'), `installed ${installed} must match pinned ${pinned}`);
+});
+
 test('markdown renderer builds ordered lists', () => {
   const { renderMarkdown } = loadMarkdownRenderer();
   const html = renderMarkdown('1. **Wilson Clash 108** - control.\n2. Head Ti.S6 - light.');
