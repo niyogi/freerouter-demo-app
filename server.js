@@ -13,7 +13,12 @@
 
 const path = require('path');
 const crypto = require('crypto');
+// Env precedence: real environment > demo-github-app/.env > repo-root
+// .env (shared defaults). dotenv never overrides an already-set var, so
+// the demo dir loads first and the root only fills gaps. Missing files
+// are silently ignored.
 require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const express = require('express');
 
 const PORT = Number(process.env.PORT || 3000);

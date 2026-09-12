@@ -52,7 +52,7 @@ Open [http://localhost:3000](http://localhost:3000) and start chatting.
 | `MONETIZABLE_KEYTERMS` | `true` hyperlinks the top 3 extracted keyterms in each reply (FreeRouter only) | `false` |
 | `PORT` | Local port | `3000` |
 
-> `.env` is git-ignored. Never commit a real key — that's the whole reason this demo has a server.
+> `.env` is git-ignored. Never commit a real key — that's the whole reason this demo has a server. The demo also reads the repo-root `.env` (one level up) as fallback for anything its own `.env` doesn't set — handy for values you share across projects. Real environment variables beat both files.
 
 ## The swap: FreeRouter ↔ OpenRouter
 
