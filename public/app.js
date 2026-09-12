@@ -140,11 +140,12 @@ function addAds(ads) {
       brandRow.appendChild(brand);
       card.appendChild(brandRow);
     }
-    const title = ad.title && ad.title !== ad.brandName ? ad.title : (!ad.brandName ? ad.title : '');
-    if (title) {
+    // Title always renders when present (even if it matches the brand) —
+    // same as the reference tile: head row is attribution, title is content.
+    if (ad.title) {
       const head = document.createElement('div');
       head.className = 'ad-head';
-      head.textContent = title;
+      head.textContent = ad.title;
       card.appendChild(head);
     }
     if (ad.adText) {
@@ -153,10 +154,17 @@ function addAds(ads) {
       body.textContent = ad.adText;
       card.appendChild(body);
     }
+    // CTA is a styled span, not a nested link: the whole tile opens
+    // clickUrl (nested anchors would double-open). Arrow matches the
+    // reference tile.
     if (ad.clickUrl) {
       const cta = document.createElement('span');
       cta.className = 'ad-cta';
-      cta.textContent = ad.cta || 'Learn more';
+      cta.textContent = `${ad.cta || 'Learn more'} `;
+      const arrow = document.createElement('i');
+      arrow.className = 'bi bi-arrow-up-right';
+      arrow.setAttribute('aria-hidden', 'true');
+      cta.appendChild(arrow);
       card.appendChild(cta);
     }
     if (ad.impUrl) {

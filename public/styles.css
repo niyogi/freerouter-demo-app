@@ -89,7 +89,9 @@ body {
 .ad-head { font-weight: 600; margin-bottom: 4px; }
 .ad-text { font-size: 0.9rem; margin-bottom: 8px; }
 .ad-cta {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 14px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -98,6 +100,7 @@ body {
   color: #fff;
   text-decoration: none;
 }
+.msg.ad.clickable:hover .ad-cta { filter: brightness(0.9); }
 .msg.ad img { position: absolute; visibility: hidden; }
 .msg.ad.clickable { cursor: pointer; }
 .ad-imp { position: absolute; visibility: hidden; }
