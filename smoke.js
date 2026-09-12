@@ -14,7 +14,7 @@ process.env.PROVIDER_API_KEY = 'smoke-test-key';
 process.env.MODEL = 'openrouter/free';
 
 const app = require('./server');
-const { cleanMessages, buildUpstreamBody, describeAdsResult, describeKeytermsResult, config } = app;
+const { cleanMessages, clientIp, buildUpstreamBody, describeAdsResult, describeKeytermsResult, config } = app;
 
 test('config reflects env (base URL, model, safe hostname)', () => {
   assert.equal(config.providerBaseUrl, 'https://upstream.example');
@@ -157,6 +157,35 @@ test('describeKeytermsResult with keyterms on distinguishes toggle-off silence',
     'keyterms=empty',
     'keyterms=extractor_error',
   ]);
+});
+
+test('clientIp prefers the browser IP, never loopback/LAN', () => {
+  assert.equal(clientIp({ ip: '203.0.113.7' }), '203.0.113.7');
+  assert.equal(clientIp({ ip: '::ffff:203.0.113.7' }), '203.0.113.7');
+  assert.equal(clientIp({ ip: '127.0.0.1' }), '');
+  assert.equal(clientIp({ ip: '::1' }), '');
+  assert.equal(clientIp({ ip: '192.168.1.10' }), '');
+  assert.equal(clientIp({ ip: '10.0.0.5' }), '');
+  assert.equal(clientIp({}), '');
+  assert.equal(clientIp(null), '');
+});
+
+test('COMPANION_ADS=true forwards the client IP into ad_request', () => {
+  const { execFileSync } = require('node:child_process');
+  const script = `
+    const server = require('./server.js');
+    const withClient = server.buildUpstreamBody([{ role: 'user', content: 'hi' }], { ip: '203.0.113.7', ua: 'smoke-ua' });
+    const fallback = server.buildUpstreamBody([{ role: 'user', content: 'hi' }], { ip: '', ua: 'smoke-ua' });
+    console.log(JSON.stringify({ withClient: withClient.ad_request, fallbackIp: fallback.ad_request.ip }));
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    cwd: __dirname,
+    env: { ...process.env, COMPANION_ADS: 'true' },
+    encoding: 'utf8',
+  });
+  const { withClient, fallbackIp } = JSON.parse(out);
+  assert.equal(withClient.ip, '203.0.113.7', 'browser IP must reach Gravity, not the server IP');
+  assert.equal(typeof fallbackIp, 'string', 'local browsers fall back to the resolved public IP');
 });
 
 test('expected routes are wired', () => {

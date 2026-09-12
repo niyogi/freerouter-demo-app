@@ -70,6 +70,22 @@ function buildUpstreamBody(messages, { ip, ua }) {
   return body;
 }
 
+// End-user IP for ad_request (Gravity requires a public client IP for
+// geo + fraud checks — a server/datacenter IP looks like a bot and
+// no-fills). Express is left without `trust proxy` on purpose: this demo
+// is opened directly, so req.ip is the real browser address and a client
+// can't spoof it via X-Forwarded-For. Loopback and LAN addresses (local
+// testing) fall back to the server's resolved public IP — same egress the
+// browser uses — instead of sending 127.0.0.1, which Gravity drops.
+function clientIp(req) {
+  const raw = String((req && req.ip) || '');
+  const ip = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+  if (!ip) return '';
+  if (ip === '127.0.0.1' || ip === '::1') return '';
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|fc00:|fe80:)/i.test(ip)) return '';
+  return ip;
+}
+
 // One-word ads outcome for the console. Note the last case: when we asked
 // for ads but the proxy attached neither `ads` nor `ads_error`, the key's
 // Companion Ads toggle is off — the proxy ignores ad_request entirely.
@@ -140,12 +156,15 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'Body must be { messages: [{ role, content }] }.' });
   }
 
-  // End-user context for ads: the browser UA plus the resolved public IP.
+  // End-user context for ads: the browser IP + UA. buildAdRequest falls
+  // back to the server's resolved public IP when the browser is local.
+  const adIp = clientIp(req);
   const upstreamBody = buildUpstreamBody(messages, {
+    ip: adIp,
     ua: req.get('User-Agent') || '',
   });
   const startedAt = Date.now();
-  console.log(`[demo] chat → ${providerHost()} model=${MODEL} messages=${messages.length}${upstreamBody.ad_request ? ` ad_request(placement=${upstreamBody.ad_request.placement})` : ''}`);
+  console.log(`[demo] chat → ${providerHost()} model=${MODEL} messages=${messages.length}${upstreamBody.ad_request ? ` ad_request(placement=${upstreamBody.ad_request.placement} ip=${adIp ? 'client' : 'public-fallback'})` : ''}`);
 
   let upstream;
   try {
@@ -206,6 +225,7 @@ if (require.main === module) {
 // Exported for smoke.js (unit-level checks that run without binding a port).
 module.exports = app;
 module.exports.cleanMessages = cleanMessages;
+module.exports.clientIp = clientIp;
 module.exports.buildUpstreamBody = buildUpstreamBody;
 module.exports.buildLinkRequest = buildLinkRequest;
 module.exports.describeAdsResult = describeAdsResult;
