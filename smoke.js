@@ -1,8 +1,9 @@
 'use strict';
 
 // Offline smoke test: unit-level checks that run without binding a port
-// (no listen needed). Verifies message validation, route wiring, and env
-// config. Run: npm run smoke (or: node --test smoke.js)
+// (no listen needed). Verifies message/shape validation, upstream body
+// building per shape, reply extraction, client SSE accumulation, route
+// wiring, and env config. Run: npm run smoke (or: node --test smoke.js)
 // NOTE: a live boot (`npm start` + opening the chat in a browser) is the
 // real end-to-end check — do that on your own machine.
 
@@ -320,6 +321,125 @@ test('markdown renderer builds ordered lists', () => {
   assert.match(html, /^<ol>.*<\/ol>$/);
   assert.ok(html.includes('<li><strong>Wilson Clash 108</strong> - control.</li>'));
   assert.ok(!html.includes('<br />'), 'list items must not collapse into a paragraph');
+});
+
+test('cleanShape defaults to chat, accepts responses', () => {
+  const { cleanShape, upstreamPathFor } = app;
+  assert.equal(cleanShape(undefined), 'chat');
+  assert.equal(cleanShape(''), 'chat');
+  assert.equal(cleanShape('chat'), 'chat');
+  assert.equal(cleanShape('responses'), 'responses');
+  assert.equal(cleanShape('RESPONSES'), 'responses');
+  assert.equal(cleanShape('anthropic'), 'chat');
+  assert.equal(upstreamPathFor('chat'), '/v1/chat/completions');
+  assert.equal(upstreamPathFor('responses'), '/v1/responses');
+});
+
+test('buildUpstreamBody defaults to a chat body without stream', () => {
+  const body = buildUpstreamBody([{ role: 'user', content: 'hi' }], { ua: 'smoke-ua' });
+  assert.deepEqual(body.messages, [{ role: 'user', content: 'hi' }]);
+  assert.ok(!('input' in body), 'responses input must be absent on chat');
+  assert.ok(!('stream' in body), 'stream must be absent unless requested');
+});
+
+test('buildUpstreamBody builds a responses body with input + stream', () => {
+  const msgs = [{ role: 'user', content: 'hi' }];
+  const chatStream = buildUpstreamBody(msgs, { ua: 'smoke-ua', shape: 'chat', stream: true });
+  assert.deepEqual(chatStream.messages, msgs);
+  assert.equal(chatStream.stream, true);
+  const body = buildUpstreamBody(msgs, { ua: 'smoke-ua', shape: 'responses', stream: true });
+  assert.deepEqual(body.input, msgs);
+  assert.ok(!('messages' in body), 'chat messages must be absent on responses');
+  assert.equal(body.stream, true);
+});
+
+test('extractReply reads both shapes', () => {
+  const { extractReply, extractChatReply, extractResponsesReply } = app;
+  assert.equal(extractChatReply({ choices: [{ message: { content: 'hello' } }] }), 'hello');
+  assert.equal(extractChatReply({}), '');
+  assert.equal(extractResponsesReply({ output_text: 'yo' }), 'yo');
+  assert.equal(
+    extractResponsesReply({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'a' }, { type: 'output_text', text: 'b' }] }] }),
+    'ab',
+  );
+  assert.equal(extractResponsesReply({}), '');
+  assert.equal(extractReply({ output_text: 'r' }, 'responses'), 'r');
+  assert.equal(extractReply({ choices: [{ message: { content: 'c' } }] }, undefined), 'c');
+});
+
+// The streaming accumulator is pure client code inside the browser bundle —
+// load it into a vm context (same trick as the markdown renderer) so SSE
+// regressions pin here.
+function loadStreamState() {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const src = fs.readFileSync(require('node:path').join(__dirname, 'public', 'app.js'), 'utf8');
+  const m = src.match(/function createStreamState[\s\S]*?^}/m);
+  assert.ok(m, 'function createStreamState must exist in public/app.js');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(m[0], ctx);
+  return ctx;
+}
+
+test('stream state accumulates chat SSE deltas and terminal extras', () => {
+  const { createStreamState } = loadStreamState();
+  const { state, handleRecord } = createStreamState('chat');
+  handleRecord('data: {"choices":[{"delta":{"role":"assistant"}}]}');
+  handleRecord('data: {"choices":[{"delta":{"content":"Hello"}}]}');
+  handleRecord('data: {"choices":[{"delta":{"content":" there"}}]}');
+  assert.equal(state.text, 'Hello there');
+  assert.equal(state.done, false);
+  handleRecord('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}');
+  handleRecord('data: {"ads": [], "keyterms": []}');
+  handleRecord('data: [DONE]');
+  assert.equal(state.done, true);
+  // Length checks, not deepEqual: arrays built inside the vm context live
+  // in another realm, so strict deepEqual rejects them (same-structure,
+  // not reference-equal).
+  assert.equal(state.ads.length, 0);
+  assert.equal(state.keyterms.length, 0);
+});
+
+test('stream state ignores keep-alives and garbage lines', () => {
+  const { createStreamState } = loadStreamState();
+  const { state, handleRecord } = createStreamState('chat');
+  handleRecord(': keep-alive');
+  handleRecord('data: not-json');
+  handleRecord('event: ping\ndata: {"choices":[{"delta":{"content":"x"}}]}');
+  assert.equal(state.text, 'x');
+  assert.equal(state.done, false);
+});
+
+test('stream state accumulates responses SSE deltas and terminal extras', () => {
+  const { createStreamState } = loadStreamState();
+  const { state, handleRecord } = createStreamState('responses');
+  handleRecord('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hel"}');
+  handleRecord('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"lo"}');
+  assert.equal(state.text, 'Hello');
+  assert.equal(state.done, false);
+  handleRecord('event: response.completed\ndata: {"type":"response.completed","response":{"output_text":"Hello","ads":[{"title":"a"}],"keyterms":[]}}');
+  assert.equal(state.text, 'Hello');
+  assert.equal(state.done, true);
+  assert.equal(state.ads.length, 1);
+  assert.equal(state.keyterms.length, 0);
+});
+
+test('stream state fills responses text from the terminal when no deltas arrived', () => {
+  const { createStreamState } = loadStreamState();
+  const { state, handleRecord } = createStreamState('responses');
+  handleRecord('event: response.completed\ndata: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"full"}]}]}}');
+  assert.equal(state.text, 'full');
+  assert.equal(state.done, true);
+});
+
+test('controls offer a shape choice and a streaming toggle', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+  assert.ok(html.includes('name="shape"'), 'shape radios must exist');
+  assert.ok(html.includes('value="responses"'), 'responses option must exist');
+  assert.ok(html.includes('id="stream"'), 'stream toggle must exist');
 });
 
 test('expected routes are wired', () => {

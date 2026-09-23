@@ -15,6 +15,15 @@
       <p class="pill" id="provider-pill">Connecting…</p>
     </header>
 
+    <div class="controls" id="controls">
+      <fieldset class="seg" id="shape-seg">
+        <legend>API shape</legend>
+        <label class="seg-opt"><input type="radio" name="shape" value="chat" checked /> Chat Completions</label>
+        <label class="seg-opt"><input type="radio" name="shape" value="responses" /> Responses</label>
+      </fieldset>
+      <label class="stream-toggle"><input type="checkbox" id="stream" /> Stream</label>
+    </div>
+
     <section class="chat" id="messages" aria-live="polite"></section>
 
     <form class="composer" id="composer">

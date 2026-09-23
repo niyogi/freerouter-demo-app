@@ -1,7 +1,9 @@
 'use strict';
 
 // Minimal chat client: keeps history in memory, talks only to our own
-// server (POST /api/chat). The provider key never appears here.
+// server (POST /api/chat). The provider key never appears here. The top
+// controls pick the API shape (chat → /v1/chat/completions, responses →
+// /v1/responses) and whether to stream the reply via SSE.
 
 const messagesEl = document.getElementById('messages');
 const form = document.getElementById('composer');
@@ -10,6 +12,47 @@ const sendBtn = document.getElementById('send');
 const pill = document.getElementById('provider-pill');
 
 const history = [];
+
+// Request options (persisted across reloads). Both shapes support both
+// modes; streaming relays upstream SSE for a typewriter effect.
+const shapeInputs = Array.from(document.querySelectorAll('input[name="shape"]'));
+const streamToggle = document.getElementById('stream');
+let shape = 'chat';
+let streamMode = false;
+try {
+  const saved = JSON.parse(localStorage.getItem('fr-demo-prefs') || '{}');
+  if (saved && (saved.shape === 'chat' || saved.shape === 'responses')) shape = saved.shape;
+  if (saved && typeof saved.stream === 'boolean') streamMode = saved.stream;
+} catch {
+  // Storage unavailable (private browsing, …) — defaults stand.
+}
+for (const r of shapeInputs) r.checked = r.value === shape;
+if (streamToggle) streamToggle.checked = streamMode;
+function savePrefs() {
+  try {
+    localStorage.setItem('fr-demo-prefs', JSON.stringify({ shape, stream: streamMode }));
+  } catch {
+    // Non-fatal.
+  }
+}
+for (const r of shapeInputs) {
+  r.addEventListener('change', () => {
+    if (r.checked) {
+      shape = r.value;
+      savePrefs();
+    }
+  });
+}
+if (streamToggle) {
+  streamToggle.addEventListener('change', () => {
+    streamMode = streamToggle.checked;
+    savePrefs();
+  });
+}
+function lockControls(locked) {
+  for (const r of shapeInputs) r.disabled = locked;
+  if (streamToggle) streamToggle.disabled = locked;
+}
 
 // Assistant rendering via the markdown-it package (vendored at
 // /vendor/markdown-it.umd.min.js). Same security posture as the old
@@ -313,13 +356,115 @@ async function loadConfig() {
   }
 }
 
+// Pure SSE accumulation for streaming (no DOM): one record in, deltas out.
+// Chat records are `data: { choices: [{ delta: { content } }] }` ending with
+// `data: [DONE]`; Responses records are `data: { type, ... }` with text in
+// `response.output_text.delta` and the full answer plus the ads/keyterms
+// siblings on the terminal `response.completed`. Pinned in smoke.js via the
+// same vm trick as the markdown renderer.
+function createStreamState(activeShape) {
+  const isResponses = activeShape === 'responses';
+  const state = { text: '', ads: null, ads_error: null, keyterms: null, keyterms_error: null, done: false };
+  function takeChatPayload(evt) {
+    const choice = evt && evt.choices && evt.choices[0];
+    const delta = choice && choice.delta;
+    if (delta && typeof delta.content === 'string') state.text += delta.content;
+    if (Array.isArray(evt.ads)) state.ads = evt.ads;
+    else if (evt.ads_error) state.ads_error = evt.ads_error;
+    if (Array.isArray(evt.keyterms)) state.keyterms = evt.keyterms;
+    else if (evt.keyterms_error) state.keyterms_error = evt.keyterms_error;
+  }
+  function extractTerminalText(resp) {
+    if (typeof resp.output_text === 'string' && resp.output_text) return resp.output_text;
+    let out = '';
+    const items = Array.isArray(resp.output) ? resp.output : [];
+    for (const item of items) {
+      if (!item || item.type !== 'message' || !Array.isArray(item.content)) continue;
+      for (const part of item.content) {
+        if (part && part.type === 'output_text') out += String(part.text || '');
+      }
+    }
+    return out;
+  }
+  function takeResponsesEvent(evt) {
+    if (evt.type === 'response.output_text.delta') {
+      state.text += String(evt.delta || '');
+    } else if (evt.type === 'response.completed' || evt.type === 'response.incomplete') {
+      // Deltas already accumulated the text; only fill from the terminal
+      // object when nothing arrived yet.
+      if (!state.text) state.text = extractTerminalText(evt.response || {});
+      const resp = evt.response || {};
+      if (Array.isArray(resp.ads)) state.ads = resp.ads;
+      else if (resp.ads_error) state.ads_error = resp.ads_error;
+      if (Array.isArray(resp.keyterms)) state.keyterms = resp.keyterms;
+      else if (resp.keyterms_error) state.keyterms_error = resp.keyterms_error;
+      state.done = true;
+    }
+  }
+  function handleRecord(record) {
+    const payloads = [];
+    const lines = String(record).split('\n');
+    for (const line of lines) {
+      if (line.indexOf('data:') === 0) payloads.push(line.slice(5).trim());
+    }
+    for (const raw of payloads) {
+      if (raw === '[DONE]') {
+        state.done = true;
+        continue;
+      }
+      let evt = null;
+      try {
+        evt = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (!evt || typeof evt !== 'object') continue;
+      if (isResponses) takeResponsesEvent(evt);
+      else takeChatPayload(evt);
+    }
+  }
+  return { state, handleRecord };
+}
+
+// Shared finish for buffered and streamed replies: append to history,
+// render ads, hyperlink keyterms.
+function finishAssistant(fullText, extras) {
+  const botDiv = addMessage('bot', fullText);
+  history.push({ role: 'assistant', content: fullText });
+  const data = extras || {};
+  // Ads narration: addAds renders SPONSORED unconditionally per ad
+  // object, so a missing label means no ad arrived (or the browser
+  // hid it) — never a render-logic skip. Say so in the console.
+  if (Array.isArray(data.ads)) {
+    if (!data.ads.length) console.info('[demo ads] no fill (ads: []) — nothing to render.');
+    addAds(data.ads);
+  } else if (data.ads_error) {
+    console.warn(`[demo ads] ${data.ads_error.code || 'error'} — ${data.ads_error.message || ''}`);
+  }
+  if (Array.isArray(data.keyterms)) hyperlinkKeyterms(botDiv, data.keyterms);
+  return botDiv;
+}
+
 async function sendMessage(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed || sendBtn.disabled) return;
   sendBtn.disabled = true;
+  lockControls(true);
 
   addMessage('user', trimmed);
   history.push({ role: 'user', content: trimmed });
+
+  try {
+    if (streamMode) await sendMessageStream();
+    else await sendMessageBuffered();
+  } finally {
+    sendBtn.disabled = false;
+    lockControls(false);
+    input.focus();
+  }
+}
+
+async function sendMessageBuffered() {
   const typing = addMessage('bot', 'Thinking…');
   typing.classList.add('typing');
 
@@ -327,33 +472,101 @@ async function sendMessage(text) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: history }),
+      body: JSON.stringify({ messages: history, shape, stream: false }),
     });
     const data = await res.json();
     typing.remove();
     if (!res.ok) {
       addError(data.error || 'Something went wrong.');
     } else {
-      const botDiv = addMessage('bot', data.reply);
-      history.push({ role: 'assistant', content: data.reply });
-      // Ads narration: addAds renders SPONSORED unconditionally per ad
-      // object, so a missing label means no ad arrived (or the browser
-      // hid it) — never a render-logic skip. Say so in the console.
-      if (Array.isArray(data.ads)) {
-        if (!data.ads.length) console.info('[demo ads] no fill (ads: []) — nothing to render.');
-        addAds(data.ads);
-      } else if (data.ads_error) {
-        console.warn(`[demo ads] ${data.ads_error.code || 'error'} — ${data.ads_error.message || ''}`);
-      }
-      if (Array.isArray(data.keyterms)) hyperlinkKeyterms(botDiv, data.keyterms);
+      finishAssistant(data.reply, data);
     }
   } catch (err) {
     typing.remove();
     addError(`Could not reach the server: ${err.message}`);
-  } finally {
-    sendBtn.disabled = false;
-    input.focus();
   }
+}
+
+async function sendMessageStream() {
+  const botDiv = addMessage('bot', 'Thinking…');
+  botDiv.classList.add('typing');
+
+  let res = null;
+  try {
+    res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: history, shape, stream: true }),
+    });
+  } catch (err) {
+    botDiv.remove();
+    addError(`Could not reach the server: ${err.message}`);
+    return;
+  }
+  const contentType = res.headers.get('content-type') || '';
+  if (!res.ok || contentType.indexOf('text/event-stream') === -1 || !res.body) {
+    // The server answers JSON, not SSE, when the request itself failed
+    // (bad key, unknown model, no /v1/responses on this provider, …).
+    let message = 'Something went wrong.';
+    try {
+      const data = await res.json();
+      if (data && data.error) message = data.error;
+    } catch {
+      // Non-JSON error body — keep the default.
+    }
+    botDiv.remove();
+    addError(message);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const stream = createStreamState(shape);
+  let buffer = '';
+  let painted = '';
+  const paint = () => {
+    if (stream.state.text === painted) return;
+    painted = stream.state.text;
+    botDiv.classList.remove('typing');
+    botDiv.innerHTML = renderAssistant(painted);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      buffer += decoder.decode(next.value, { stream: true });
+      let idx = -1;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        stream.handleRecord(buffer.slice(0, idx));
+        buffer = buffer.slice(idx + 2);
+        paint();
+      }
+    }
+    if (buffer.trim()) {
+      stream.handleRecord(buffer);
+      buffer = '';
+      paint();
+    }
+  } catch (err) {
+    // Mid-stream network cut: keep whatever arrived, if anything.
+    console.warn(`[demo stream] ${err.message}`);
+  }
+  const fullText = stream.state.text;
+  if (!fullText) {
+    botDiv.remove();
+    addError('Upstream returned no reply. Try again.');
+    return;
+  }
+  // Swap the live div for the standard finish path so streamed and
+  // buffered replies share history/ads/keyterms handling exactly.
+  botDiv.remove();
+  finishAssistant(fullText, {
+    ads: stream.state.ads,
+    ads_error: stream.state.ads_error,
+    keyterms: stream.state.keyterms,
+    keyterms_error: stream.state.keyterms_error,
+  });
 }
 
 form.addEventListener('submit', (e) => {

@@ -6,10 +6,12 @@ A simple, clean chatbot powered by [FreeRouter](https://freerouter.com) — one 
 
 ## What this is
 
-A minimal full-stack chatbot (under 300 lines of app code) that shows what integrating with FreeRouter looks like in practice:
+A minimal full-stack chatbot that shows what integrating with FreeRouter looks like in practice:
 
 - Type a message, get an AI reply. Conversation history is kept in memory.
 - The provider API key lives **only on the server** — the browser never sees it.
+- A top-of-page **API shape** switch: **Chat Completions** (`POST /v1/chat/completions`) or **Responses** (`POST /v1/responses`) — same key, same model, two dialects.
+- A **Stream** toggle: buffered JSON replies or live SSE typewriter output, on either shape.
 - Swap between FreeRouter and OpenRouter by changing the base URL + key (+ model) in one file and restarting.
 
 If you can run this demo, you can integrate FreeRouter into any Node app.
@@ -43,6 +45,8 @@ Open [http://localhost:3000](http://localhost:3000) and start chatting.
 
 **Confirm it's working:** after sending a message, head to the **Logs tab** in your [FreeRouter dashboard](https://freerouter.com) — you should see your successful API request listed there, confirming your key is configured correctly and being used.
 
+Try all four combinations: flip the **API shape** switch (Chat Completions ↔ Responses) and the **Stream** toggle, then send a message each way. Your choice persists across reloads.
+
 | Variable | What it is | Default |
 |---|---|---|
 | `PROVIDER_BASE_URL` | Which gateway to talk to | `https://api.freerouter.com` |
@@ -70,21 +74,38 @@ This is the point of the demo. FreeRouter speaks the same OpenAI-compatible API 
 
 Same UI, same code, different provider. The footer shows the active provider hostname + model so you can see the swap took effect. To go back, restore the FreeRouter values and restart.
 
+> Responses + streaming when swapped: Chat Completions works on any OpenAI-compatible provider, so the swap is seamless there. The Responses shape posts to `{BASE_URL}/v1/responses` — if the swapped-to provider doesn't serve that endpoint you'll get its 404 as a chat error; just switch the shape back to Chat Completions.
+
+## API shape + streaming
+
+The controls at the top of the page send `{ messages, shape, stream }` to `POST /api/chat`:
+
+| Shape | Upstream endpoint | Buffered reply | Streamed deltas |
+|---|---|---|---|
+| Chat Completions | `POST /v1/chat/completions` | `choices[0].message.content` | `data: { choices: [{ delta: { content } }] }` … `data: [DONE]` |
+| Responses | `POST /v1/responses` | `output_text` (output items fallback) | `response.output_text.delta` … terminal `response.completed` (no `[DONE]`) |
+
+- **Buffered** (`stream` off): the server parses the reply per shape and returns `{ reply }` (+ `ads`/`ads_error`, `keyterms` when those features are on).
+- **Streaming** (`stream` on): the server forwards `stream: true` upstream and relays the SSE bytes straight through as `text/event-stream`. The browser accumulates deltas per shape and renders markdown live. Ads/keyterms ride the terminal SSE event on both shapes, exactly as they ride the buffered JSON — streamed replies render them the same way.
+- The server logs the shape per request (`chat(chat)`, `chat(responses+stream)`, …) so you can see which endpoint each message used.
+
 ## How it works (architecture)
 
 ```
 browser (public/app.js) ──POST /api/chat──▶  Node server (server.js)
-                                                      │  attaches key + MODEL
+  { messages, shape, stream }                         │  attaches key + MODEL
                                                       ▼
-                                          {BASE_URL}/v1/chat/completions
-                                          (FreeRouter or OpenRouter)
+                              {BASE_URL}/v1/chat/completions  (shape: chat)
+                              {BASE_URL}/v1/responses         (shape: responses)
+                              (FreeRouter serves both; OpenRouter: chat only)
+                              buffered JSON ─or─ SSE relay when stream: true
 ```
 
 - **`server.js`** — Express server. Serves the static frontend, exposes three routes:
   - `GET /api/health` → `{ ok: true }` (smoke checks).
   - `GET /api/config` → `{ providerHost, model }` for the UI footer. **Never returns the key.**
-  - `POST /api/chat` → validates `{ messages }`, forwards `{ model, messages }` to `{PROVIDER_BASE_URL}/v1/chat/completions` with `Authorization: Bearer <key>`, returns `{ reply }`. Upstream errors are relayed with their status and message.
-- **`public/`** — dependency-free frontend. `index.html` (layout), `styles.css` (light/dark via `prefers-color-scheme`, mobile-responsive), `app.js` (keeps history, calls only same-origin `/api/chat`).
+  - `POST /api/chat` → validates `{ messages }`, reads `shape` (`chat` default) + `stream` (`false` default), forwards `{ model, messages }` or `{ model, input, stream }` to the matching upstream endpoint with `Authorization: Bearer <key>`. Buffered replies return `{ reply }`; streams relay upstream SSE. Upstream errors are relayed with their status and message.
+- **`public/`** — dependency-free frontend. `index.html` (layout + shape/stream controls), `styles.css` (light/dark via `prefers-color-scheme`, mobile-responsive), `app.js` (keeps history, calls only same-origin `/api/chat`, parses SSE per shape when streaming).
 - **Why a server at all?** FreeRouter keys are secrets, like passwords. A pure HTML/JS page would ship your key to every visitor's browser. The ~60-line server route keeps the key private while the frontend stays dumb — this is the pattern to copy into production apps.
 
 ### Verify it yourself
@@ -104,6 +125,8 @@ Any Node host works (Render, Fly.io, Railway, a VPS). Set `PROVIDER_BASE_URL`, `
 | `/api/chat` says `PROVIDER_API_KEY is not set` | `.env` missing or key blank | `cp .env.example .env`, paste key, restart |
 | `401` / `Unauthorized` | Wrong or revoked key | Re-copy the key from the dashboard |
 | `404` on `/v1/chat/completions` | Key's API shape isn't `openai` | Set the key's shape to `openai` (see step 2) |
+| `404` on `/v1/responses` | Key's API shape isn't `openai`, or the swapped-to provider has no Responses endpoint | Set the key's shape to `openai`; on non-FreeRouter providers use Chat Completions |
+| Stream starts then stalls | Reverse proxy buffering SSE | Disable proxy buffering for `/api/chat` (e.g. `X-Accel-Buffering: no` on nginx) or turn Stream off |
 | `404` / model-not-found mentioning the model id | That provider doesn't know `MODEL` | Set `MODEL` to a valid id for the active provider |
 | `Could not reach …` / `502` | Wrong `PROVIDER_BASE_URL` or no network | Check the URL (include `https://`, no trailing path) |
 | No ad card with `COMPANION_ADS=true` | Key toggle off, no ad network configured, or no fill | Turn Companion Ads on for the key, add a network under Settings → Ad Networks, and confirm fills in the dashboard playground first |
