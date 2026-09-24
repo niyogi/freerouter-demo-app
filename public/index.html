@@ -11,7 +11,7 @@
   <main class="shell">
     <header class="hero">
       <h1>FreeRouter Chatbot Demo</h1>
-      <p class="sub">One API key. Zero lock-in. This chatbot runs on FreeRouter — and swaps to OpenRouter with two env vars.</p>
+      <p class="sub">One API key. Zero lock-in. This chatbot runs on FreeRouter — and swaps to OpenRouter with two env vars. <a href="https://github.com/niyogi/freerouter-demo-app" target="_blank" rel="noopener">Demo source</a> · <a href="https://freerouter.com" target="_blank" rel="noopener">Get your free key on FreeRouter</a></p>
       <p class="pill" id="provider-pill">Connecting…</p>
     </header>
 
@@ -21,7 +21,8 @@
         <label class="seg-opt"><input type="radio" name="shape" value="chat" checked /> Chat Completions</label>
         <label class="seg-opt"><input type="radio" name="shape" value="responses" /> Responses</label>
       </fieldset>
-      <label class="stream-toggle"><input type="checkbox" id="stream" /> Stream</label>
+      <label class="stream-toggle"><input type="checkbox" id="stream" checked /> Stream</label>
+      <button type="button" class="newchat" id="new-chat">New chat</button>
     </div>
 
     <section class="chat" id="messages" aria-live="polite"></section>

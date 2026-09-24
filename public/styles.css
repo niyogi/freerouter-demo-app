@@ -27,7 +27,7 @@ body {
 }
 
 .shell {
-  max-width: 680px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 24px 16px 40px;
   display: flex;
@@ -71,6 +71,9 @@ body {
   padding: 0 8px;
 }
 .seg-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.85rem;
   padding: 6px 14px;
   border-radius: 999px;
@@ -82,7 +85,7 @@ body {
   color: #fff;
 }
 .seg-opt:has(input:disabled) { opacity: 0.5; cursor: default; }
-.seg-opt input { accent-color: var(--bubble-user); }
+.seg-opt input { accent-color: var(--bubble-user); margin: 0; }
 .stream-toggle {
   display: inline-flex;
   align-items: center;
@@ -96,6 +99,17 @@ body {
   height: 1.1rem;
   accent-color: var(--bubble-user);
 }
+.newchat {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.newchat:hover { border-color: var(--bubble-user); color: var(--bubble-user); }
+.sub a { color: var(--bubble-user); }
 
 .chat {
   flex: 1;
@@ -156,7 +170,7 @@ body {
 .ad-imp { position: absolute; visibility: hidden; }
 
 .msg.bot p { margin: 0 0 8px; }
-.msg.bot p:last-child { margin-bottom: 0; }
+.msg.bot > :last-child { margin-bottom: 0; }
 .msg.bot pre {
   background: rgba(128, 128, 128, 0.15);
   border-radius: 8px;

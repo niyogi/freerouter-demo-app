@@ -18,7 +18,7 @@ const history = [];
 const shapeInputs = Array.from(document.querySelectorAll('input[name="shape"]'));
 const streamToggle = document.getElementById('stream');
 let shape = 'chat';
-let streamMode = false;
+let streamMode = true;
 try {
   const saved = JSON.parse(localStorage.getItem('fr-demo-prefs') || '{}');
   if (saved && (saved.shape === 'chat' || saved.shape === 'responses')) shape = saved.shape;
@@ -89,12 +89,14 @@ function renderAssistant(text) {
   const md = getMarkdown();
   if (md) {
     try {
-      return md.render(src);
+      // Trim: markdown-it appends a trailing newline, which renders as a
+      // visible gap below the text inside the bubble (pre-wrap whitespace).
+      return md.render(src).trim();
     } catch {
       // fall through to built-in
     }
   }
-  return renderMarkdown(src);
+  return renderMarkdown(src).trim();
 }
 
 function addMessage(role, text) {
@@ -575,6 +577,15 @@ form.addEventListener('submit', (e) => {
   input.value = '';
   sendMessage(text);
 });
+
+const newChatBtn = document.getElementById('new-chat');
+function newChat() {
+  history.length = 0;
+  messagesEl.innerHTML = '';
+  addMessage('bot', 'Hi! Ask me anything.');
+  input.focus();
+}
+if (newChatBtn) newChatBtn.addEventListener('click', newChat);
 
 document.querySelectorAll('.chip').forEach((chip) => {
   chip.addEventListener('click', () => sendMessage(chip.textContent));

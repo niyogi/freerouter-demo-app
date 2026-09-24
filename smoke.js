@@ -440,6 +440,13 @@ test('controls offer a shape choice and a streaming toggle', () => {
   assert.ok(html.includes('name="shape"'), 'shape radios must exist');
   assert.ok(html.includes('value="responses"'), 'responses option must exist');
   assert.ok(html.includes('id="stream"'), 'stream toggle must exist');
+  assert.ok(/id="stream"[^>]*checked|checked[^>]*id="stream"/.test(html), 'stream must be on by default');
+  assert.ok(html.includes('id="new-chat"'), 'new-chat button must exist');
+});
+
+test('assistant renderer trims trailing whitespace (no gap under short replies)', () => {
+  const { renderAssistant } = loadAssistantRenderer(false);
+  assert.equal(renderAssistant('Hi! Ask me anything.'), '<p>Hi! Ask me anything.</p>');
 });
 
 test('expected routes are wired', () => {
