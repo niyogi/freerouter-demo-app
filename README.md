@@ -20,9 +20,9 @@ If you can run this demo, you can integrate FreeRouter into any Node app.
 
 **Prerequisites:** [Node.js](https://nodejs.org) 20 or newer, plus a terminal.
 
-### 1. Sign up at freerouter.com and grab your starter key
+### 1. Sign up at freerouter.com and create a key
 
-Create an account at [freerouter.com](https://freerouter.com). Every new account includes a **starter key** — copy it from your dashboard. (It looks like `fr_live_…`.)
+Create an account at [freerouter.com](https://freerouter.com). FreeRouter is bring-your-own-key, so first add your own [OpenRouter](https://openrouter.ai) API key under **Providers**, then create a FreeRouter API key under **API Keys** routed at it, and copy the secret (it looks like `fr_live_…` and is shown once).
 
 ### 2. Make sure the key's API shape is `openai`
 
@@ -34,7 +34,7 @@ This demo speaks the **OpenAI dialect**, so set your key's shape to **`openai`**
 
 ```bash
 cp .env.example .env
-# Edit .env: paste your starter key as PROVIDER_API_KEY.
+# Edit .env: paste your FreeRouter key as PROVIDER_API_KEY.
 # MODEL defaults to openrouter/free, which costs nothing — leave it.
 
 npm install
@@ -136,7 +136,7 @@ Any Node host works (Render, Fly.io, Railway, a VPS). Set `PROVIDER_BASE_URL`, `
 
 FreeRouter keys can monetize with [Companion Ads](https://docs.freerouter.com/companion-ads.html): a sponsored slot that rides alongside each reply without ever failing inference. To try it in this demo:
 
-1. In the FreeRouter dashboard, turn **Companion Ads on** for your key and configure an ad network under **Settings → Ad Networks** (you'll need a publisher key from the network — Gravity is supported today). Without both steps, no ad returns.
+1. In the FreeRouter dashboard, turn **Companion Ads on** for your key. FreeRouter provisions the placement on the first `ad_request` — you do not need to paste a publisher key. Optionally add your own key under **Settings → Ad Networks** if that field is offered.
 2. Set `COMPANION_ADS=true` in `.env` and restart.
 
 The demo then attaches an `ad_request` using the same placement the FreeRouter playground previews with, and renders any fill as a labeled "Sponsored" card under the reply (clicks go through `clickUrl`, views fire `impUrl`). Empty fills and `ads_error` outcomes render nothing — the chat keeps working regardless. The request carries your browser's IP (Gravity needs a public client IP for geo/fraud — a server IP no-fills); on localhost it falls back to the server's public IP. Watch the `ip=client:…|fallback:…` tag on the demo console's `ad_request(...)` line — the address is last-octet-masked. If the demo runs behind a reverse proxy, set `TRUST_PROXY=true` so the client IP is read from `X-Forwarded-For` (only behind a proxy you control).
